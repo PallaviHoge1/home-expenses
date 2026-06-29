@@ -7,4 +7,5 @@ export { default as Sheet } from "./Sheet";
 export { default as MonthPicker } from "./MonthPicker";
 export { default as ConfirmDialog } from "./ConfirmDialog";
 export { default as EmptyState } from "./EmptyState";
+export { default as DayStrip } from "./DayStrip";
 export { ToastProvider, useToast } from "./Toast";

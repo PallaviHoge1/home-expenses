@@ -1,14 +1,23 @@
 import { useState, useEffect, useMemo } from "react";
 import { ChevronDown, X } from "lucide-react";
-import { Sheet, Input, ChipGroup } from "./ui";
+import { Sheet, Input, ChipGroup, DayStrip } from "./ui";
 import {
   SPENT_BY, PERSON_COLORS, CATEGORY_CONFIG, CATEGORIES, MEAL_TAGS, MEAL_COLORS,
 } from "../config/categories";
-import { genId, today } from "../utils/helpers";
+import { genId, today, getCurrentMonthKey } from "../utils/helpers";
 import { getQuickCategories } from "../utils/quickPicks";
 
-const buildEmptyForm = (defaultSpentBy = "") => ({
-  date: today(), amount: "",
+// Default date: today if activeMonth is current month, else 1st of activeMonth
+const defaultDate = (activeMonth) => {
+  const currentMonth = getCurrentMonthKey();
+  if (activeMonth === currentMonth) return today();
+  // Old month — pick 1st
+  return `${activeMonth}-01`;
+};
+
+const buildEmptyForm = (defaultSpentBy = "", activeMonth = "") => ({
+  date: activeMonth ? defaultDate(activeMonth) : today(),
+  amount: "",
   spentBy: defaultSpentBy,
   category: "",
   subCategory: "", subSubCategory: "", mealTag: "",
@@ -17,9 +26,9 @@ const buildEmptyForm = (defaultSpentBy = "") => ({
 
 export default function ExpenseForm({
   open, onClose, onSave, editData,
-  expenses = [], currentUser = "",
+  expenses = [], currentUser = "", month = "",
 }) {
-  const [form, setForm] = useState(() => buildEmptyForm(currentUser));
+  const [form, setForm] = useState(() => buildEmptyForm(currentUser, month));
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,21 +38,29 @@ export default function ExpenseForm({
     [quickCategories]
   );
 
+  // For DayStrip: use edit expense's month, or the dashboard month
+  const stripMonth = useMemo(() => {
+    if (editData?.date) {
+      const [y, m] = editData.date.split("-");
+      return `${y}-${m}`;
+    }
+    return month || getCurrentMonthKey();
+  }, [editData, month]);
+
   useEffect(() => {
     if (!open) return;
     setErrors({});
     setSubmitting(false);
     if (editData) {
-      // Edit mode: respect the original spentBy, don't override with currentUser
       setForm({
-        ...buildEmptyForm(currentUser), ...editData,
+        ...buildEmptyForm(currentUser, month),
+        ...editData,
         amount: String(Math.abs(editData.amount || 0)),
       });
     } else {
-      // New entry: pre-fill spentBy with current user
-      setForm(buildEmptyForm(currentUser));
+      setForm(buildEmptyForm(currentUser, month));
     }
-  }, [editData, open, currentUser]);
+  }, [editData, open, currentUser, month]);
 
   const update = (patch) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -106,7 +123,7 @@ export default function ExpenseForm({
         id: editData?.id || genId(),
         amount: form.isRefund ? -amount : amount,
       });
-      setForm(buildEmptyForm(currentUser));
+      setForm(buildEmptyForm(currentUser, month));
       onClose();
     } catch (err) { console.error(err); }
     finally { setSubmitting(false); }
@@ -118,13 +135,12 @@ export default function ExpenseForm({
   return (
     <Sheet open={open} onClose={onClose} title={editData ? "Edit Expense" : "Add Expense"} wide>
       <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
-        {/* Row 1: Date | Amount | Spent By */}
-        <div className="grid grid-cols-1 sm:grid-cols-[160px_160px_1fr] gap-4 items-start">
-          <Input
-            label="Date" type="date" value={form.date}
-            onChange={(v) => update({ date: v })}
-            error={errors.date} max={today()}
-          />
+        {/* Day strip — month locked to dashboard selection */}
+        <DayStrip month={stripMonth} value={form.date} onChange={(v) => update({ date: v })} />
+        {errors.date && <p className="text-xs text-red-500 -mt-3">{errors.date}</p>}
+
+        {/* Amount | Spent By */}
+        <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4 items-start">
           <Input
             label="Amount (₹)" type="number" value={form.amount}
             onChange={(v) => {
@@ -144,7 +160,7 @@ export default function ExpenseForm({
           </div>
         </div>
 
-        {/* Category — Quick chips + dropdown for the rest */}
+        {/* Category chips + dropdown */}
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">
             Category
@@ -155,8 +171,7 @@ export default function ExpenseForm({
               const col = CATEGORY_CONFIG[cat]?.color || "#4f46e5";
               return (
                 <button
-                  key={cat}
-                  type="button"
+                  key={cat} type="button"
                   onClick={() => onCategoryChange(selected ? "" : cat)}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
                     selected
@@ -169,7 +184,6 @@ export default function ExpenseForm({
                 </button>
               );
             })}
-
             <div className="relative w-[200px]">
               <select
                 value={dropdownValue}
@@ -188,16 +202,14 @@ export default function ExpenseForm({
               </select>
               {dropdownValue ? (
                 <button
-                  type="button"
-                  onClick={() => onCategoryChange("")}
+                  type="button" onClick={() => onCategoryChange("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-white/20"
-                  aria-label="Clear category"
+                  aria-label="Clear"
                 >
                   <X size={12} className="text-white" />
                 </button>
               ) : (
-                <ChevronDown
-                  size={12}
+                <ChevronDown size={12}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"
                 />
               )}
@@ -209,13 +221,9 @@ export default function ExpenseForm({
         {/* Sub Category — chips */}
         {subOptions.length > 0 && (
           <div>
-            <ChipGroup
-              label="Sub Category"
-              options={subOptions}
-              value={form.subCategory}
+            <ChipGroup label="Sub Category" options={subOptions} value={form.subCategory}
               onChange={(val) => update({ subCategory: val, subSubCategory: "" })}
-              accentColor={categoryColor}
-            />
+              accentColor={categoryColor} />
             {errors.subCategory && <p className="text-xs text-red-500 mt-1">{errors.subCategory}</p>}
           </div>
         )}
@@ -223,60 +231,45 @@ export default function ExpenseForm({
         {/* Source / Type — chips */}
         {subSubOptions.length > 0 && (
           <div>
-            <ChipGroup
-              label="Source / Type"
-              options={subSubOptions}
-              value={form.subSubCategory}
+            <ChipGroup label="Source / Type" options={subSubOptions} value={form.subSubCategory}
               onChange={(val) => update({ subSubCategory: val })}
-              accentColor={categoryColor}
-            />
+              accentColor={categoryColor} />
             {errors.subSubCategory && <p className="text-xs text-red-500 mt-1">{errors.subSubCategory}</p>}
           </div>
         )}
 
-        {/* Row: Meal/Refund | Notes */}
+        {/* Meal/Refund | Notes */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           <div className="flex flex-col gap-3">
             {config?.hasMealTag && (
-              <ChipGroup
-                label="Meal" options={MEAL_TAGS} value={form.mealTag}
-                onChange={(val) => update({ mealTag: val })} colorMap={MEAL_COLORS}
-              />
+              <ChipGroup label="Meal" options={MEAL_TAGS} value={form.mealTag}
+                onChange={(val) => update({ mealTag: val })} colorMap={MEAL_COLORS} />
             )}
             {config?.hasRefund && (
               <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox" checked={form.isRefund}
+                <input type="checkbox" checked={form.isRefund}
                   onChange={(e) => update({ isRefund: e.target.checked })}
-                  className="w-4 h-4 rounded border-gray-300 text-indigo-500 focus:ring-indigo-400"
-                />
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-500 focus:ring-indigo-400" />
                 <span className="text-sm text-gray-600">This is a refund</span>
               </label>
             )}
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notes</label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => update({ notes: e.target.value })}
-              placeholder="Optional notes..."
-              rows={2} maxLength={500}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 resize-none"
-            />
+            <textarea value={form.notes} onChange={(e) => update({ notes: e.target.value })}
+              placeholder="Optional notes..." rows={2} maxLength={500}
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 resize-none" />
           </div>
         </div>
 
+        {/* Buttons */}
         <div className="flex justify-end gap-3 pt-1">
-          <button
-            type="button" onClick={onClose}
-            className="px-5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-          >
+          <button type="button" onClick={onClose}
+            className="px-5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
             Cancel
           </button>
-          <button
-            type="submit" disabled={submitting}
-            className="px-6 py-2.5 rounded-lg bg-indigo-500 text-white font-medium text-sm hover:bg-indigo-600 active:scale-[0.98] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-          >
+          <button type="submit" disabled={submitting}
+            className="px-6 py-2.5 rounded-lg bg-indigo-500 text-white font-medium text-sm hover:bg-indigo-600 active:scale-[0.98] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2">
             {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
             {submitting ? "Saving..." : editData ? "Update" : "Add Expense"}
           </button>

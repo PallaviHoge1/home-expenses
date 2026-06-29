@@ -261,6 +261,7 @@ function AppShell({ currentUser, onLogout }) {
         onSave={handleSave} editData={editData}
         expenses={expenses}
         currentUser={currentUser}
+        month={month}
       />
       <ConfirmDialog
         open={deleteId !== null} onClose={() => setDeleteId(null)}
