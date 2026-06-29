@@ -1,8 +1,16 @@
-// API layer — returns {ok, data, error, source}. Always writes to localStorage.
+// ─────────────────────────────────────────────
+// API LAYER — Supabase Backend
+// ─────────────────────────────────────────────
+// Returns {ok, data, error} so the UI can react to failures.
+// Falls back to localStorage when Supabase isn't configured.
 
-const API_URL = import.meta.env.VITE_API_URL || "";
-const useLocal = !API_URL;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const useLocal = !SUPABASE_URL || !SUPABASE_KEY;
 
+const TABLE = "expenses";
+
+// ─── Local Storage (always-on backup) ───
 const LOCAL_KEY = "home-expenses-data";
 
 const localGet = () => {
@@ -15,31 +23,65 @@ const localSet = (data) => {
   catch (e) { console.error("LocalStorage write failed:", e); return false; }
 };
 
-const postToApi = async (payload) => {
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload),
-    redirect: "follow",
+// ─── Supabase REST helper ───
+const supaFetch = async (path, options = {}) => {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "return=representation",
+      ...options.headers,
+    },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.success === false) throw new Error(json.error || "API error");
-  return json;
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
 };
+
+// ─── Map frontend fields ↔ Supabase columns ───
+const toDbRow = (expense) => ({
+  id: expense.id,
+  date: expense.date,
+  amount: expense.amount,
+  spent_by: expense.spentBy,
+  category: expense.category,
+  sub_category: expense.subCategory || "",
+  sub_sub_category: expense.subSubCategory || "",
+  meal_tag: expense.mealTag || "",
+  is_refund: expense.isRefund || false,
+  notes: (expense.notes || "").trim(),
+});
+
+const fromDbRow = (row) => ({
+  id: row.id,
+  date: row.date,
+  amount: Number(row.amount),
+  spentBy: row.spent_by,
+  category: row.category,
+  subCategory: row.sub_category || "",
+  subSubCategory: row.sub_sub_category || "",
+  mealTag: row.meal_tag || "",
+  isRefund: row.is_refund || false,
+  notes: row.notes || "",
+});
+
+// ─── API Methods ───
 
 export async function fetchExpenses() {
   if (useLocal) return { ok: true, data: localGet(), source: "local" };
   try {
-    const res = await fetch(`${API_URL}?action=getAll`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json.success === false) throw new Error(json.error);
-    const data = json.expenses || [];
+    const rows = await supaFetch(`${TABLE}?select=*&order=date.desc`);
+    const data = rows.map(fromDbRow);
     localSet(data);
     return { ok: true, data, source: "remote" };
   } catch (err) {
-    console.error("API fetch error:", err);
+    console.error("Supabase fetch error:", err);
     return { ok: false, data: localGet(), source: "local", error: err.message };
   }
 }
@@ -50,7 +92,12 @@ export async function addExpense(expense) {
   localSet(local);
   if (useLocal) return { ok: true, data: expense };
   try {
-    await postToApi({ action: "add", expense });
+    await supaFetch(TABLE, {
+      method: "POST",
+      body: JSON.stringify(toDbRow(expense)),
+      headers: { "Prefer": "resolution=ignore-duplicates,return=representation" },
+      prefer: "resolution=ignore-duplicates,return=representation",
+    });
     return { ok: true, data: expense };
   } catch (err) { return { ok: false, data: expense, error: err.message }; }
 }
@@ -63,7 +110,10 @@ export async function updateExpense(expense) {
   localSet(local);
   if (useLocal) return { ok: true, data: expense };
   try {
-    await postToApi({ action: "update", expense });
+    await supaFetch(`${TABLE}?id=eq.${encodeURIComponent(expense.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(toDbRow(expense)),
+    });
     return { ok: true, data: expense };
   } catch (err) { return { ok: false, data: expense, error: err.message }; }
 }
@@ -72,7 +122,9 @@ export async function deleteExpense(id) {
   localSet(localGet().filter((e) => e.id !== id));
   if (useLocal) return { ok: true };
   try {
-    await postToApi({ action: "delete", id });
+    await supaFetch(`${TABLE}?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     return { ok: true };
   } catch (err) { return { ok: false, error: err.message }; }
 }
@@ -81,10 +133,19 @@ export async function syncAll(expenses) {
   localSet(expenses);
   if (useLocal) return { ok: true };
   try {
-    await postToApi({ action: "syncAll", expenses });
+    // Delete all then insert
+    await supaFetch(`${TABLE}?id=neq.___impossible___`, { method: "DELETE" });
+    if (expenses.length > 0) {
+      await supaFetch(TABLE, {
+        method: "POST",
+        body: JSON.stringify(expenses.map(toDbRow)),
+      });
+    }
     return { ok: true };
   } catch (err) { return { ok: false, error: err.message }; }
 }
+
+// ─── Export/Import ───
 
 export function exportToJSON(expenses) {
   const blob = new Blob([JSON.stringify(expenses, null, 2)], { type: "application/json" });
@@ -104,10 +165,7 @@ export function importFromJSON(file) {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        if (!Array.isArray(data)) {
-          reject(new Error("Expected an array of expenses"));
-          return;
-        }
+        if (!Array.isArray(data)) { reject(new Error("Expected an array of expenses")); return; }
         const valid = data.every(
           (x) => x && typeof x === "object"
             && typeof x.id === "string"
