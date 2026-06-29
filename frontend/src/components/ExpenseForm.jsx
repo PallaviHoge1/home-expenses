@@ -1,7 +1,11 @@
-import { useState, useEffect } from "react";
-import { Sheet, Input, Select, ChipGroup } from "./ui";
-import { SPENT_BY, PERSON_COLORS, CATEGORY_CONFIG, CATEGORIES, MEAL_TAGS, MEAL_COLORS } from "../config/categories";
+import { useState, useEffect, useMemo } from "react";
+import { ChevronDown } from "lucide-react";
+import { Sheet, Input, ChipGroup } from "./ui";
+import {
+  SPENT_BY, PERSON_COLORS, CATEGORY_CONFIG, CATEGORIES, MEAL_TAGS, MEAL_COLORS,
+} from "../config/categories";
 import { genId, today } from "../utils/helpers";
+import { getQuickCategories } from "../utils/quickPicks";
 
 const buildEmptyForm = () => ({
   date: today(), amount: "", spentBy: "", category: "",
@@ -9,17 +13,29 @@ const buildEmptyForm = () => ({
   isRefund: false, notes: "",
 });
 
-export default function ExpenseForm({ open, onClose, onSave, editData }) {
+export default function ExpenseForm({ open, onClose, onSave, editData, expenses = [] }) {
   const [form, setForm] = useState(buildEmptyForm);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+
+  // Quick-pick categories (pinned essentials + dynamic top usage)
+  const quickCategories = useMemo(() => getQuickCategories(expenses), [expenses]);
+
+  // List for the "More..." dropdown — categories NOT in quick picks
+  const otherCategories = useMemo(
+    () => CATEGORIES.filter((c) => !quickCategories.includes(c)),
+    [quickCategories]
+  );
 
   useEffect(() => {
     if (!open) return;
     setErrors({});
     setSubmitting(false);
     if (editData) {
-      setForm({ ...buildEmptyForm(), ...editData, amount: String(Math.abs(editData.amount || 0)) });
+      setForm({
+        ...buildEmptyForm(), ...editData,
+        amount: String(Math.abs(editData.amount || 0)),
+      });
     } else {
       setForm(buildEmptyForm());
     }
@@ -35,6 +51,7 @@ export default function ExpenseForm({ open, onClose, onSave, editData }) {
   };
 
   const config = CATEGORY_CONFIG[form.category];
+  const categoryColor = config?.color || "#4f46e5";
 
   const subOptions = (() => {
     if (!config?.subs) return [];
@@ -46,6 +63,13 @@ export default function ExpenseForm({ open, onClose, onSave, editData }) {
     if (!config?.subs || config.subs._flat) return [];
     return config.subs[form.subCategory] || [];
   })();
+
+  const onCategoryChange = (val) => {
+    update({
+      category: val, subCategory: "", subSubCategory: "",
+      mealTag: "", isRefund: false,
+    });
+  };
 
   const validate = () => {
     const errs = {};
@@ -84,10 +108,14 @@ export default function ExpenseForm({ open, onClose, onSave, editData }) {
     finally { setSubmitting(false); }
   };
 
+  // Dropdown shows current category only if it's NOT a quick pick
+  const dropdownValue = quickCategories.includes(form.category) ? "" : form.category;
+  const dropdownColor = dropdownValue ? CATEGORY_CONFIG[dropdownValue]?.color : null;
+
   return (
     <Sheet open={open} onClose={onClose} title={editData ? "Edit Expense" : "Add Expense"} wide>
       <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
-        {/* Row 1: Date, Amount, Spent By */}
+        {/* Row 1: Date | Amount | Spent By */}
         <div className="grid grid-cols-1 sm:grid-cols-[160px_160px_1fr] gap-4 items-start">
           <Input
             label="Date" type="date" value={form.date}
@@ -113,50 +141,89 @@ export default function ExpenseForm({ open, onClose, onSave, editData }) {
           </div>
         </div>
 
-        {/* Row 2: Category cascade */}
-        <div className={`grid gap-4 items-start ${
-          subSubOptions.length > 0
-            ? "grid-cols-1 sm:grid-cols-3"
-            : subOptions.length > 0
-            ? "grid-cols-1 sm:grid-cols-2"
-            : "grid-cols-1"
-        }`}>
-          <div>
-            <Select
-              label="Category" value={form.category}
-              onChange={(val) => update({
-                category: val, subCategory: "", subSubCategory: "",
-                mealTag: "", isRefund: false,
-              })}
-              options={CATEGORIES} placeholder="Choose category..."
-            />
-            {errors.category && <p className="text-xs text-red-500 mt-1">{errors.category}</p>}
+        {/* Category — Quick chips + dropdown for the rest */}
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide block mb-1.5">
+            Category
+          </label>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {quickCategories.map((cat) => {
+              const selected = form.category === cat;
+              const col = CATEGORY_CONFIG[cat]?.color || "#4f46e5";
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => onCategoryChange(selected ? "" : cat)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                    selected
+                      ? "text-white shadow-sm"
+                      : "bg-white text-gray-700 border-gray-200 hover:border-gray-300"
+                  }`}
+                  style={selected ? { backgroundColor: col, borderColor: col } : {}}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+
+            {/* Dropdown for the remaining categories — fix #2 (no duplicate option), fix #3 (visible chevron) */}
+            <div className="relative w-[200px]">
+              <select
+                value={dropdownValue}
+                onChange={(e) => e.target.value && onCategoryChange(e.target.value)}
+                className={`w-full pl-3 pr-8 py-1.5 rounded-full border text-xs font-medium appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all ${
+                  dropdownValue
+                    ? "text-white border-transparent shadow-sm"
+                    : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
+                }`}
+                style={dropdownColor ? { backgroundColor: dropdownColor } : {}}
+              >
+                <option value="" disabled hidden>More categories...</option>
+                {otherCategories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ChevronDown
+                size={12}
+                className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
+                  dropdownValue ? "text-white" : "text-gray-400"
+                }`}
+              />
+            </div>
           </div>
-
-          {subOptions.length > 0 && (
-            <div>
-              <Select
-                label="Sub Category" value={form.subCategory}
-                onChange={(val) => update({ subCategory: val, subSubCategory: "" })}
-                options={subOptions} placeholder="Choose..."
-              />
-              {errors.subCategory && <p className="text-xs text-red-500 mt-1">{errors.subCategory}</p>}
-            </div>
-          )}
-
-          {subSubOptions.length > 0 && (
-            <div>
-              <Select
-                label="Source / Type" value={form.subSubCategory}
-                onChange={(val) => update({ subSubCategory: val })}
-                options={subSubOptions} placeholder="Choose..."
-              />
-              {errors.subSubCategory && <p className="text-xs text-red-500 mt-1">{errors.subSubCategory}</p>}
-            </div>
-          )}
+          {errors.category && <p className="text-xs text-red-500 mt-1.5">{errors.category}</p>}
         </div>
 
-        {/* Row 3: Tags + Notes */}
+        {/* Sub Category — chips (fix #4: removed dead ternary label) */}
+        {subOptions.length > 0 && (
+          <div>
+            <ChipGroup
+              label="Sub Category"
+              options={subOptions}
+              value={form.subCategory}
+              onChange={(val) => update({ subCategory: val, subSubCategory: "" })}
+              accentColor={categoryColor}
+            />
+            {errors.subCategory && <p className="text-xs text-red-500 mt-1">{errors.subCategory}</p>}
+          </div>
+        )}
+
+        {/* Source / Type — chips */}
+        {subSubOptions.length > 0 && (
+          <div>
+            <ChipGroup
+              label="Source / Type"
+              options={subSubOptions}
+              value={form.subSubCategory}
+              onChange={(val) => update({ subSubCategory: val })}
+              accentColor={categoryColor}
+            />
+            {errors.subSubCategory && <p className="text-xs text-red-500 mt-1">{errors.subSubCategory}</p>}
+          </div>
+        )}
+
+        {/* Row: Meal/Refund | Notes */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           <div className="flex flex-col gap-3">
             {config?.hasMealTag && (

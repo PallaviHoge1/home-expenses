@@ -205,6 +205,7 @@ function AppShell() {
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditData(null); }}
         onSave={handleSave} editData={editData}
+        expenses={expenses}
       />
       <ConfirmDialog
         open={deleteId !== null} onClose={() => setDeleteId(null)}
