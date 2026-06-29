@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { Sheet, Input, ChipGroup } from "./ui";
 import {
   SPENT_BY, PERSON_COLORS, CATEGORY_CONFIG, CATEGORIES, MEAL_TAGS, MEAL_COLORS,
@@ -7,21 +7,23 @@ import {
 import { genId, today } from "../utils/helpers";
 import { getQuickCategories } from "../utils/quickPicks";
 
-const buildEmptyForm = () => ({
-  date: today(), amount: "", spentBy: "", category: "",
+const buildEmptyForm = (defaultSpentBy = "") => ({
+  date: today(), amount: "",
+  spentBy: defaultSpentBy,
+  category: "",
   subCategory: "", subSubCategory: "", mealTag: "",
   isRefund: false, notes: "",
 });
 
-export default function ExpenseForm({ open, onClose, onSave, editData, expenses = [] }) {
-  const [form, setForm] = useState(buildEmptyForm);
+export default function ExpenseForm({
+  open, onClose, onSave, editData,
+  expenses = [], currentUser = "",
+}) {
+  const [form, setForm] = useState(() => buildEmptyForm(currentUser));
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Quick-pick categories (pinned essentials + dynamic top usage)
   const quickCategories = useMemo(() => getQuickCategories(expenses), [expenses]);
-
-  // List for the "More..." dropdown — categories NOT in quick picks
   const otherCategories = useMemo(
     () => CATEGORIES.filter((c) => !quickCategories.includes(c)),
     [quickCategories]
@@ -32,14 +34,16 @@ export default function ExpenseForm({ open, onClose, onSave, editData, expenses 
     setErrors({});
     setSubmitting(false);
     if (editData) {
+      // Edit mode: respect the original spentBy, don't override with currentUser
       setForm({
-        ...buildEmptyForm(), ...editData,
+        ...buildEmptyForm(currentUser), ...editData,
         amount: String(Math.abs(editData.amount || 0)),
       });
     } else {
-      setForm(buildEmptyForm());
+      // New entry: pre-fill spentBy with current user
+      setForm(buildEmptyForm(currentUser));
     }
-  }, [editData, open]);
+  }, [editData, open, currentUser]);
 
   const update = (patch) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -102,13 +106,12 @@ export default function ExpenseForm({ open, onClose, onSave, editData, expenses 
         id: editData?.id || genId(),
         amount: form.isRefund ? -amount : amount,
       });
-      setForm(buildEmptyForm());
+      setForm(buildEmptyForm(currentUser));
       onClose();
     } catch (err) { console.error(err); }
     finally { setSubmitting(false); }
   };
 
-  // Dropdown shows current category only if it's NOT a quick pick
   const dropdownValue = quickCategories.includes(form.category) ? "" : form.category;
   const dropdownColor = dropdownValue ? CATEGORY_CONFIG[dropdownValue]?.color : null;
 
@@ -167,7 +170,6 @@ export default function ExpenseForm({ open, onClose, onSave, editData, expenses 
               );
             })}
 
-            {/* Dropdown for the remaining categories — fix #2 (no duplicate option), fix #3 (visible chevron) */}
             <div className="relative w-[200px]">
               <select
                 value={dropdownValue}
@@ -184,18 +186,27 @@ export default function ExpenseForm({ open, onClose, onSave, editData, expenses 
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
-              <ChevronDown
-                size={12}
-                className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
-                  dropdownValue ? "text-white" : "text-gray-400"
-                }`}
-              />
+              {dropdownValue ? (
+                <button
+                  type="button"
+                  onClick={() => onCategoryChange("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-white/20"
+                  aria-label="Clear category"
+                >
+                  <X size={12} className="text-white" />
+                </button>
+              ) : (
+                <ChevronDown
+                  size={12}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"
+                />
+              )}
             </div>
           </div>
           {errors.category && <p className="text-xs text-red-500 mt-1.5">{errors.category}</p>}
         </div>
 
-        {/* Sub Category — chips (fix #4: removed dead ternary label) */}
+        {/* Sub Category — chips */}
         {subOptions.length > 0 && (
           <div>
             <ChipGroup
@@ -255,7 +266,6 @@ export default function ExpenseForm({ open, onClose, onSave, editData, expenses 
           </div>
         </div>
 
-        {/* Buttons */}
         <div className="flex justify-end gap-3 pt-1">
           <button
             type="button" onClick={onClose}

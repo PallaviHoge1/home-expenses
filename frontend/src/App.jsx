@@ -1,15 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LayoutDashboard, List, TrendingUp, Plus, Download, Upload } from "lucide-react";
+import { LayoutDashboard, List, TrendingUp, Plus, Download, Upload, LogOut } from "lucide-react";
 import { ConfirmDialog, ToastProvider, useToast } from "./components/ui";
 import ExpenseForm from "./components/ExpenseForm";
 import Dashboard from "./pages/Dashboard";
 import ExpenseList from "./pages/ExpenseList";
 import Trends from "./pages/Trends";
+import Login from "./pages/Login";
 import {
   fetchExpenses, addExpense, updateExpense, deleteExpense,
   exportToJSON, importFromJSON, syncAll, isRemoteConfigured,
 } from "./utils/api";
 import { getCurrentMonthKey } from "./utils/helpers";
+import { useCurrentUser } from "./utils/useCurrentUser";
+import { PERSON_COLORS } from "./config/categories";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -19,7 +22,7 @@ const TABS = [
 
 const TAB_STORAGE_KEY = "home-expenses-active-tab";
 
-function AppShell() {
+function AppShell({ currentUser, onLogout }) {
   const toast = useToast();
   const [expenses, setExpenses] = useState([]);
   const [tab, setTab] = useState(() => {
@@ -33,7 +36,9 @@ function AppShell() {
   const [editData, setEditData] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const fileRef = useRef();
+  const userMenuRef = useRef(null);
 
   useEffect(() => {
     try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch {}
@@ -49,6 +54,25 @@ function AppShell() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const clickHandler = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    const keyHandler = (e) => {
+      if (e.key === "Escape") setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", clickHandler);
+    document.addEventListener("keydown", keyHandler);
+    return () => {
+      document.removeEventListener("mousedown", clickHandler);
+      document.removeEventListener("keydown", keyHandler);
+    };
+  }, [userMenuOpen]);
 
   const handleSave = useCallback(async (entry) => {
     const isEdit = expenses.some((e) => e.id === entry.id);
@@ -124,6 +148,8 @@ function AppShell() {
     );
   }
 
+  const userColor = PERSON_COLORS[currentUser] || "#888";
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Top Navigation */}
@@ -184,6 +210,34 @@ function AppShell() {
               <Plus size={16} />
               <span className="hidden sm:inline">Add Expense</span>
             </button>
+
+            {/* User avatar with switch menu */}
+            <div className="relative ml-1" ref={userMenuRef}>
+              <button
+                onClick={() => setUserMenuOpen((v) => !v)}
+                className="w-8 h-8 rounded-full text-white text-xs font-bold flex items-center justify-center shadow-sm hover:shadow-md transition-shadow"
+                style={{ backgroundColor: userColor }}
+                title={`Logged in as ${currentUser}`}
+                aria-label="User menu"
+              >
+                {currentUser.charAt(0)}
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 bg-white border border-gray-100 rounded-lg shadow-lg py-1 min-w-[180px] z-40 animate-fade-in">
+                  <div className="px-3 py-2 border-b border-gray-100">
+                    <p className="text-xs text-gray-400">Logged in as</p>
+                    <p className="text-sm font-semibold" style={{ color: userColor }}>{currentUser}</p>
+                  </div>
+                  <button
+                    onClick={() => { setUserMenuOpen(false); onLogout(); }}
+                    className="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <LogOut size={14} className="text-gray-400" />
+                    Switch user
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -206,6 +260,7 @@ function AppShell() {
         onClose={() => { setFormOpen(false); setEditData(null); }}
         onSave={handleSave} editData={editData}
         expenses={expenses}
+        currentUser={currentUser}
       />
       <ConfirmDialog
         open={deleteId !== null} onClose={() => setDeleteId(null)}
@@ -216,10 +271,20 @@ function AppShell() {
   );
 }
 
+function AppWithAuth() {
+  const { currentUser, login, logout } = useCurrentUser();
+
+  if (!currentUser) {
+    return <Login onLogin={login} />;
+  }
+
+  return <AppShell currentUser={currentUser} onLogout={logout} />;
+}
+
 export default function App() {
   return (
     <ToastProvider>
-      <AppShell />
+      <AppWithAuth />
     </ToastProvider>
   );
 }
