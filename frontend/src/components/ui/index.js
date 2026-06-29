@@ -4,7 +4,6 @@ export { default as Select } from "./Select";
 export { default as Input } from "./Input";
 export { default as ChipGroup } from "./ChipGroup";
 export { default as Sheet } from "./Sheet";
-export { default as StatCard } from "./StatCard";
 export { default as MonthPicker } from "./MonthPicker";
 export { default as ConfirmDialog } from "./ConfirmDialog";
 export { default as EmptyState } from "./EmptyState";

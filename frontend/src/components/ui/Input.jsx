@@ -1,6 +1,6 @@
 export default function Input({
   label, type = "text", value, onChange, placeholder, required,
-  min, max, step, prefix, error, inputMode, pattern,
+  min, max, step, prefix, error, inputMode, pattern, autoFocus,
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -21,6 +21,7 @@ export default function Input({
           placeholder={placeholder} required={required}
           min={min} max={max} step={step}
           inputMode={inputMode} pattern={pattern}
+          autoFocus={autoFocus}
           className={`w-full px-3 py-2.5 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 transition-all ${
             error
               ? "border-red-300 focus:border-red-400 focus:ring-red-100"

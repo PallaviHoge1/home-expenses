@@ -24,21 +24,23 @@ const localSet = (data) => {
 };
 
 // ─── Supabase REST helper ───
-const supaFetch = async (path, options = {}) => {
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": options.prefer || "return=representation",
-      ...options.headers,
-    },
+// `prefer` is a custom shorthand for the Prefer header.
+const supaFetch = async (path, { method = "GET", body, prefer } = {}) => {
+  const headers = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  if (prefer) headers["Prefer"] = prefer;
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`HTTP ${res.status}: ${err}`);
+    throw new Error(`HTTP ${res.status}: ${err || res.statusText}`);
   }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
@@ -54,7 +56,7 @@ const toDbRow = (expense) => ({
   sub_category: expense.subCategory || "",
   sub_sub_category: expense.subSubCategory || "",
   meal_tag: expense.mealTag || "",
-  is_refund: expense.isRefund || false,
+  is_refund: !!expense.isRefund,
   notes: (expense.notes || "").trim(),
 });
 
@@ -67,7 +69,7 @@ const fromDbRow = (row) => ({
   subCategory: row.sub_category || "",
   subSubCategory: row.sub_sub_category || "",
   mealTag: row.meal_tag || "",
-  isRefund: row.is_refund || false,
+  isRefund: !!row.is_refund,
   notes: row.notes || "",
 });
 
@@ -77,7 +79,7 @@ export async function fetchExpenses() {
   if (useLocal) return { ok: true, data: localGet(), source: "local" };
   try {
     const rows = await supaFetch(`${TABLE}?select=*&order=date.desc`);
-    const data = rows.map(fromDbRow);
+    const data = (rows || []).map(fromDbRow);
     localSet(data);
     return { ok: true, data, source: "remote" };
   } catch (err) {
@@ -92,14 +94,16 @@ export async function addExpense(expense) {
   localSet(local);
   if (useLocal) return { ok: true, data: expense };
   try {
+    // Upsert pattern via single Prefer header — fix #4: no duplicate headers
     await supaFetch(TABLE, {
       method: "POST",
-      body: JSON.stringify(toDbRow(expense)),
-      headers: { "Prefer": "resolution=ignore-duplicates,return=representation" },
-      prefer: "resolution=ignore-duplicates,return=representation",
+      body: toDbRow(expense),
+      prefer: "resolution=merge-duplicates,return=minimal",
     });
     return { ok: true, data: expense };
-  } catch (err) { return { ok: false, data: expense, error: err.message }; }
+  } catch (err) {
+    return { ok: false, data: expense, error: err.message };
+  }
 }
 
 export async function updateExpense(expense) {
@@ -112,10 +116,13 @@ export async function updateExpense(expense) {
   try {
     await supaFetch(`${TABLE}?id=eq.${encodeURIComponent(expense.id)}`, {
       method: "PATCH",
-      body: JSON.stringify(toDbRow(expense)),
+      body: toDbRow(expense),
+      prefer: "return=minimal",
     });
     return { ok: true, data: expense };
-  } catch (err) { return { ok: false, data: expense, error: err.message }; }
+  } catch (err) {
+    return { ok: false, data: expense, error: err.message };
+  }
 }
 
 export async function deleteExpense(id) {
@@ -124,25 +131,34 @@ export async function deleteExpense(id) {
   try {
     await supaFetch(`${TABLE}?id=eq.${encodeURIComponent(id)}`, {
       method: "DELETE",
+      prefer: "return=minimal",
     });
     return { ok: true };
-  } catch (err) { return { ok: false, error: err.message }; }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 export async function syncAll(expenses) {
   localSet(expenses);
   if (useLocal) return { ok: true };
   try {
-    // Delete all then insert
-    await supaFetch(`${TABLE}?id=neq.___impossible___`, { method: "DELETE" });
+    // Fix #3: use safe filter that always matches (id IS NOT NULL — id is PK so never null)
+    await supaFetch(`${TABLE}?id=not.is.null`, {
+      method: "DELETE",
+      prefer: "return=minimal",
+    });
     if (expenses.length > 0) {
       await supaFetch(TABLE, {
         method: "POST",
-        body: JSON.stringify(expenses.map(toDbRow)),
+        body: expenses.map(toDbRow),
+        prefer: "return=minimal",
       });
     }
     return { ok: true };
-  } catch (err) { return { ok: false, error: err.message }; }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 // ─── Export/Import ───

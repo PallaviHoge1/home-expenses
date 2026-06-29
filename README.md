@@ -1,47 +1,20 @@
-# Home Expense Tracker
+# Home Expenses
 
 Personal expense tracker for Vignesh & Pallavi.
-20 categories with cascading sub-categories, monthly audit views, trend reports.
+Desktop-first React app, Supabase backend, deployed on Vercel.
 
 ---
 
-## What's New in v2
+## Tech Stack
 
-Fixes from the v1 code review:
-
-- **Timezone-correct dates** — `today()` now uses local date, not UTC (was wrong for IST users after 6:30 PM)
-- **Mobile-friendly actions** — three-dot menu replaces hover-only edit/delete buttons
-- **Validation feedback** — inline error messages on every form field
-- **Negative-amount prevention** — typing `-` is stripped at input level
-- **Consistent refund accounting** — pie chart and breakdown agree on percentages
-- **Toast notifications** — success, error, and undo-on-delete (5-second window)
-- **Resilient API layer** — returns `{ok, data, error}`, falls back to local on failure
-- **Tab persistence** — last-viewed tab restored on reload
-- **"Today" jump button** — tap the month label to jump to current month
-- **Correct FAB centering** — uses `max-w-lg` math properly on tablets
-- **Type-safe IDs in Sheets** — backend casts all IDs to strings (was breaking edit/delete for numeric-looking IDs)
-- **Sheet UX polish** — Escape key closes, body scroll locks, slide-up animation
-- **Import validation** — checks structure before replacing data
+- **Frontend:** React 18, Vite, Tailwind CSS, Recharts, lucide-react
+- **Backend:** Supabase (PostgreSQL + REST API)
+- **Hosting:** Vercel
+- **Cost:** ₹0/month
 
 ---
 
-## Architecture
-
-```
-Your Phone / Browser
-        ↓
-  Netlify (free hosting)
-        ↓
-  Google Apps Script (free API)
-        ↓
-  Google Sheet (your data)
-```
-
-Total monthly cost: ₹0
-
----
-
-## Quick Start
+## Quick Start (Local Dev)
 
 ```bash
 cd frontend
@@ -49,37 +22,67 @@ npm install
 npm run dev
 ```
 
-Opens at `http://localhost:3000`. Works immediately with localStorage.
+Open `http://localhost:3000`. Works immediately with localStorage (no backend needed).
 
 ---
 
-## Full Setup with Google Sheets Backend
+## Connecting to Supabase
 
-### Step 1: Create the Sheet
-1. Go to [Google Sheets](https://sheets.google.com) → blank sheet
-2. Rename it to "Home Expenses"
+### 1. Create a Supabase project
+- Sign up at [supabase.com](https://supabase.com)
+- Create a new project (pick Mumbai region)
 
-### Step 2: Add the Apps Script
-1. Extensions → Apps Script
-2. Paste everything from `backend/Code.gs`
-3. Save (💾)
-4. Deploy → New Deployment
-5. Type: **Web app**, Execute as: **Me**, Access: **Anyone**
-6. Copy the deployment URL
+### 2. Create the table
+In **SQL Editor**, run:
+```sql
+CREATE TABLE expenses (
+  id TEXT PRIMARY KEY,
+  date DATE NOT NULL,
+  amount NUMERIC NOT NULL,
+  spent_by TEXT NOT NULL,
+  category TEXT NOT NULL,
+  sub_category TEXT DEFAULT '',
+  sub_sub_category TEXT DEFAULT '',
+  meal_tag TEXT DEFAULT '',
+  is_refund BOOLEAN DEFAULT FALSE,
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-### Step 3: Connect the Frontend
+ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all access"
+  ON expenses FOR ALL
+  USING (true)
+  WITH CHECK (true);
+```
+
+### 3. Get credentials
+In **Settings → API**, copy:
+- Project URL → looks like `https://xxxxx.supabase.co`
+- Anon public key
+
+### 4. Configure frontend
 Create `frontend/.env`:
 ```
-VITE_API_URL=https://script.google.com/macros/s/YOUR_ID/exec
+VITE_SUPABASE_URL=https://xxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGc...
 ```
+
 Restart `npm run dev`.
 
-### Step 4: Deploy to Netlify
-```bash
-cd frontend
-npm run build
-```
-Drag the `dist/` folder to [Netlify Drop](https://app.netlify.com/drop).
+---
+
+## Deploying to Vercel
+
+1. Push the repo to GitHub
+2. Go to [vercel.com](https://vercel.com) → New Project → Import the repo
+3. Set Root Directory to `frontend`
+4. Framework Preset: **Vite**
+5. Add Environment Variables:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Deploy
 
 ---
 
@@ -89,22 +92,22 @@ Drag the `dist/` folder to [Netlify Drop](https://app.netlify.com/drop).
 home-expenses/
 ├── frontend/
 │   ├── src/
-│   │   ├── config/categories.js    ← all 20 categories, colors, subs
+│   │   ├── config/categories.js    ← all 20 categories
 │   │   ├── components/
-│   │   │   ├── ui/                 ← 11 reusable primitives
-│   │   │   ├── CascadingCategorySelect.jsx
-│   │   │   ├── ExpenseForm.jsx
-│   │   │   └── ExpenseRow.jsx
-│   │   ├── pages/                  ← 3 main views
-│   │   ├── utils/                  ← helpers, api
+│   │   │   ├── ui/                 ← 10 reusable primitives
+│   │   │   └── ExpenseForm.jsx     ← desktop grid form
+│   │   ├── pages/
+│   │   │   ├── Dashboard.jsx       ← stats + charts + top 5
+│   │   │   ├── ExpenseList.jsx     ← table view
+│   │   │   └── Trends.jsx          ← 6-month trends
+│   │   ├── utils/
+│   │   │   ├── api.js              ← Supabase REST + localStorage fallback
+│   │   │   └── helpers.js          ← date, currency formatters
 │   │   ├── App.jsx
 │   │   └── main.jsx
-│   ├── index.html
 │   ├── package.json
 │   ├── vite.config.js
 │   └── tailwind.config.js
-├── backend/
-│   └── Code.gs                     ← Google Apps Script
 └── README.md
 ```
 
@@ -112,46 +115,70 @@ home-expenses/
 
 ## Features
 
-- 20 categories with cascading sub / sub-sub selection
-- Meal tags (Breakfast/Lunch/Dinner/Snacks) for Outside Food
-- Refund toggle for Travel
-- Notes on every entry
-- Search + filter by category and person
-- Monthly summary with pie chart and person split
-- 6-month trends — category, person, total
-- Export/Import JSON
-- Undo on delete (5-second window)
+**Dashboard**
+- Month picker
+- Stat cards: Total, Per-person split, Refunds
+- Category pie chart with breakdown list
+- Daily spending bar chart
+- Top 5 expenses table
+- Month-over-month change indicator
+
+**Expenses**
+- Sortable table with all entries
+- Filter by category, person, search
+- Inline edit/delete actions
+
+**Trends**
+- 6-month total bar chart
+- Per-person comparison
+- Per-category line chart
+
+**Form**
+- Wide modal, fields laid out in rows
+- Date, Amount, Person on top row
+- Category cascade auto-expands columns
+- Notes + tags side by side
+- Field-level validation errors
+- Auto-focus on Amount when adding new
+
+**Other**
+- Toast notifications (success / error / undo)
+- 5-second undo window for deletes
 - Optimistic UI with local fallback
-- Mobile-first responsive layout
+- Export/Import JSON
+- Tab persistence across reloads
+- 20 categories with cascading sub/sub-sub
+- Meal tags for Outside Food
+- Refund toggle for Travel
 
 ---
 
-## Adding or Editing Categories
+## Adding Categories
 
-Everything lives in `frontend/src/config/categories.js`.
+Edit `frontend/src/config/categories.js`:
 
 ```js
 // Flat (no sub-categories):
 "Flat Category": { color: "#hex", subs: null }
 
-// One level (sub only):
-"Simple Category": {
+// One level:
+"Simple": {
   color: "#hex",
-  subs: { _flat: ["Sub1", "Sub2", "Others"] },
+  subs: { _flat: ["Option 1", "Option 2"] },
 }
 
-// Two levels (sub → sub-sub):
-"Deep Category": {
+// Two levels:
+"Deep": {
   color: "#hex",
   subs: {
     "Group A": ["Item 1", "Item 2"],
-    "Group B": ["Item 3", "Item 4"],
+    "Group B": ["Item 3"],
   },
 }
 
-// Optional flags:
+// Optional:
 hasMealTag: true   // shows Breakfast/Lunch/Dinner/Snacks
 hasRefund: true    // shows refund checkbox
 ```
 
-The form auto-adapts. No other file needs changes.
+Form auto-adapts. No other file needs changes.

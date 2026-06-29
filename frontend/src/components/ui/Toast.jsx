@@ -54,7 +54,7 @@ const TYPE_STYLES = {
 
 function ToastViewport({ toasts, dismiss }) {
   return (
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
       {toasts.map((t) => {
         const s = TYPE_STYLES[t.type] || TYPE_STYLES.info;
         const Icon = s.icon;
